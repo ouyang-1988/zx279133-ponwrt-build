@@ -1,0 +1,11 @@
+#!/bin/sh
+# Enable sk-txfix on first boot. The link itself is created unconditionally
+# because the CI checkout has no symlinks (core.symlinks=false) and a link
+# committed in the repository would land as a plain file.
+
+[ -n "${IPKG_INSTROOT:-}${PKG_ROOT:-}${CI:-}" ] && exit 0
+
+mkdir -p /etc/rc.d
+[ -x /etc/init.d/sk-txfix ] && ln -sf ../init.d/sk-txfix /etc/rc.d/S21sk-txfix
+
+exit 0

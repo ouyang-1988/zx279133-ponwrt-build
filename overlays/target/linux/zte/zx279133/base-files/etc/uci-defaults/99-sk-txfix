@@ -1,0 +1,49 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# 99-sk-txfix - keep the LAN transmit path from claiming hardware checksum
+# offload, and keep fw4 from offloading flows in hardware.
+#
+# Why this exists
+# ---------------
+# The zx279133 driver advertises NETIF_F_HW_CSUM on its conduit device and
+# every DSA user port inherits it. On this board the IDM computes the
+# transport checksum of a LAN-transmitted frame from the wrong offsets, so a
+# fresh flash answers ICMP (which carries a trivial checksum the peer
+# validates differently) but every TCP/UDP reply on 22/80/53 leaves the box
+# with a bad checksum and is dropped by the peer without a RST. That is the
+# "80 is unreachable after flashing" report.
+#
+# kernel-overlays/drivers/net/ethernet/zte/zx279133.h now defines
+# zx279133_tx_hw_csum as 0, which stops the driver from advertising the
+# feature at compile time. This script is the runtime belt for images built
+# before that change landed, and it is harmless when the driver already
+# declines: ethtool simply reports that tx checksumming is off.
+#
+# Build-time rules (same as 99-sk-nat): the chroot has no uci and no ethtool
+# for the target architecture, and a background child of a uci-defaults
+# script inherits the make jobserver socket and can hang the build (docs/85).
+# Everything below therefore runs only on the device.
+
+[ -n "${IPKG_INSTROOT:-}${PKG_ROOT:-}${CI:-}" ] && exit 0
+
+if ! command -v ethtool >/dev/null 2>&1; then
+	logger -p daemon.notice -t sk-txfix "ethtool is not in this image; skipping runtime tx-off"
+	exit 0
+fi
+
+for dev in lan-cpu0 br-lan lan0 lan1 lan2 lan3 lan4 eth0; do
+	[ -e "/sys/class/net/$dev" ] || continue
+	ethtool -K "$dev" tx off 2>/dev/null
+done
+
+# fw4 defaults to hardware flow offloading on this target, and a flow that is
+# offloaded to the switch bypasses the stack's checksum fix-up completely.
+if command -v uci >/dev/null 2>&1; then
+	uci -q set firewall.@defaults[0].flow_offloading_hw='0'
+	uci -q commit firewall
+fi
+
+logger -p daemon.notice -t sk-txfix "tx checksum offload disabled on LAN devices; flow_offloading_hw=0"
+
+exit 0

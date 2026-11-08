@@ -182,7 +182,19 @@ extern u16 zx279133_tx_port;
  */
 #define ZX279133_LAN_TX_WORD4		0x003e0000
 #define zx279133_tx_word4_bit23		0
-#define zx279133_tx_hw_csum		1
+/*
+ * IDM checksum generation is IPv4/TCP-only, and the descriptor word it
+ * writes for a DSA user port frame is only correct on the PON path: LAN
+ * frames leave the box with a checksum the peer silently discards, which
+ * is why a clean flash answers ping and nothing else on TCP.
+ *
+ * Keep this 0. The driver then does not advertise NETIF_F_HW_CSUM, and
+ * zx279133_tx_csum_reason() returns ZX279133_TX_CSUM_DISABLED on its first
+ * line, so the stack fills the checksum in skb_checksum_help() instead.
+ * tests/sk_tcp_harness.h defines its own copy as 1 to exercise the
+ * hardware-reason table and is unaffected by this value.
+ */
+#define zx279133_tx_hw_csum		0
 
 /*
  * The BMU geometry, as the vendor's own board runs it.

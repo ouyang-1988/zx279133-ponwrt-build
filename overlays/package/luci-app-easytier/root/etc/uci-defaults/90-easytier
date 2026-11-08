@@ -1,0 +1,22 @@
+[ -n "${IPKG_INSTROOT:-}${PKG_ROOT:-}" ] && exit 1
+
+# procd does not know about /etc/init.d/easytier until it is enabled, and the
+# package manager cannot create the rc.d link at image time (the CI checkout
+# has no symlinks and the build root must not run service scripts). Create
+# the link here, on first boot, exactly like 99-sk-nat does.
+mkdir -p /etc/rc.d
+[ -x /etc/init.d/easytier ] && ln -sf ../init.d/easytier /etc/rc.d/S99easytier
+
+# /dev/net/tun is provided by the kernel (CONFIG_TUN=y); the device node is
+# created by the tun driver itself when devtmpfs is mounted. Only the node is
+# missing on this image because /dev is a tmpfs populated by procd, so create
+# it if the driver is present but the node is not.
+if [ ! -e /dev/net/tun ] && grep -q ' tun$' /proc/misc 2>/dev/null; then
+	mkdir -p /dev/net
+	mknod /dev/net/tun c 10 200
+fi
+
+# The mesh config must stay root-only: it carries the network secret.
+[ -f /etc/easytier/config.toml ] && chmod 600 /etc/easytier/config.toml
+
+exit 0

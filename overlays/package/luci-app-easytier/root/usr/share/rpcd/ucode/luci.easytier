@@ -1,0 +1,50 @@
+#!/usr/bin/env ucode
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+import { readfile } from 'fs';
+
+function text(path) {
+	let value = readfile(path);
+	return value == null ? null : trim(value);
+}
+
+return {
+	'luci.easytier': {
+		status: {
+			call: function() {
+				// procd supervises the daemon; the pidfile is advisory. Report
+				// what the kernel says, never what we hope.
+				let pid = text('/var/run/easytier-core.pid');
+				let alive = false;
+				if (pid != null && match(pid, /^[0-9]+$/))
+					alive = readfile('/proc/' + pid + '/cmdline') != null;
+				return {
+					running: alive,
+					pid: alive ? +pid : null,
+					tun: readfile('/proc/misc') != null && index(readfile('/proc/misc'), ' tun') >= 0,
+					config_present: readfile('/etc/easytier/config.toml') != null
+				};
+			}
+		},
+		info: {
+			call: function() {
+				let cfg = text('/etc/easytier/config.toml');
+				if (cfg == null)
+					return { network_name: null, hostname: null, peers: [], config_present: false };
+				let name = match(cfg, /network_name\s*=\s*"([^"]*)"/);
+				let host = match(cfg, /hostname\s*=\s*"([^"]*)"/);
+				let peers = [];
+				for (let line in split(cfg, '\n')) {
+					let m = match(trim(line), /^uri\s*=\s*"([^"]+)"/);
+					if (m) push(peers, m[1]);
+				}
+				return {
+					network_name: name ? name[1] : null,
+					hostname: host ? host[1] : null,
+					peers: peers,
+					config_present: true
+				};
+			}
+		}
+	}
+};

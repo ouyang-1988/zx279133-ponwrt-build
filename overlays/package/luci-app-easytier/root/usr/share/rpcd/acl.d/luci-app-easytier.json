@@ -1,0 +1,14 @@
+{
+  "luci-app-easytier": {
+    "description":"Configure and inspect the EasyTier mesh instance",
+    "read": {
+      "ubus": {
+        "luci.easytier":["status","peers","info"],
+        "service":["list"],
+        "system":["board"]
+      },
+      "uci":["easytier","network"]
+    },
+    "write":{"uci":["easytier"]}
+  }
+}

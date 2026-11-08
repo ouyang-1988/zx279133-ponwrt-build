@@ -122,3 +122,12 @@ dtb/** -text
 # The rule is as narrow as the file it protects: one path, not the directory, and it
 # has to come after the `overlays/**` rule because the last matching rule wins.
 overlays/target/linux/zte/zx279133/firmware/** -text -diff
+# EasyTier ships as two static aarch64-musl executables, pre-placed under the package
+# files/ tree.  The directory-wide `overlays/** text eol=lf` rule above would treat them
+# as text: a CRLF checkout rewrites every 0x0d byte in a 5.9 MB / 2.4 MB ELF, and the
+# package installs the corrupted bytes as /usr/bin/easytier-core and /usr/bin/easytier-cli.
+# Nothing in the build would notice - INSTALL_BIN does not verify the payload, RSTRIP is
+# disabled, and the image would only fail once the board boots and execve() returns
+# ENOEXEC.  Marked -text -diff and placed after the `overlays/**` rule because the last
+# matching rule wins.
+overlays/package/network/utils/easytier/files/** -text -diff

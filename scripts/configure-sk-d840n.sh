@@ -518,12 +518,19 @@ printf '%s\n' CONFIG_PACKAGE_luci-app-sk-d840n-pon=y CONFIG_PACKAGE_luci-theme-a
 	CONFIG_PACKAGE_luci-i18n-argon-config-zh-cn=y CONFIG_LUCI_LANG_zh_Hans=y \
 	CONFIG_PACKAGE_firewall4=y CONFIG_PACKAGE_luci-app-firewall=y CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y >>.config
 
+# EasyTier 2.6.4: prebuilt static aarch64 binaries, shipped in overlays/ so the
+# build never touches the network, plus a JS/ucode LuCI page. TUN itself is a
+# kernel built-in (CONFIG_TUN=y in configs/sk-d840n-offload.config), so there is
+# no kmod-tun to select here - this target has no kmod package feed.
+printf 'CONFIG_PACKAGE_easytier=y\n' >>.config
+printf 'CONFIG_PACKAGE_luci-app-easytier=y\n' >>.config
+
 skd840n_select_theme .
 make defconfig
 skd840n_pin_offload_build_config .config "$OFFLOAD_PROFILE"
 skd840n_pin_kernel_size .config KERNEL_
 skd840n_check_theme_config .config
-for package in kmod-mtd-rw sk-layout-check libfdt zxpond libzxpon-omci luci-app-sk-d840n-pon luci-mod-system luci-theme-argon luci-i18n-base-zh-cn luci-i18n-argon-config-zh-cn firewall4 luci-app-firewall luci-i18n-firewall-zh-cn rpcd-mod-ucode ucode-mod-fs; do
+for package in kmod-mtd-rw sk-layout-check libfdt zxpond libzxpon-omci luci-app-sk-d840n-pon luci-mod-system luci-theme-argon luci-i18n-base-zh-cn luci-i18n-argon-config-zh-cn firewall4 luci-app-firewall luci-i18n-firewall-zh-cn rpcd-mod-ucode ucode-mod-fs easytier luci-app-easytier; do
 	grep -qx "CONFIG_PACKAGE_$package=y" .config || {
 		echo "Required ONU/firewall package lost after defconfig: $package" >&2; exit 1;
 	}

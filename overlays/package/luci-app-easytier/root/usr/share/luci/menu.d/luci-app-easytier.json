@@ -1,0 +1,5 @@
+{
+  "admin/vpn": {"title":"VPN","order":35,"action":{"type":"firstchild"}},
+  "admin/vpn/easytier": {"title":"EasyTier 组网","order":10,"action":{"type":"view","path":"easytier/overview"},"depends":{"acl":["luci-app-easytier"]}},
+  "admin/network/easytier": {"action":{"type":"alias","path":"admin/vpn/easytier"},"depends":{"acl":["luci-app-easytier"]}}
+}

@@ -1,0 +1,22 @@
+# Easytier 2.6.4 default instance for SK-D840N.
+#
+# network_secret is deliberately empty: rotate it to match your own mesh and
+# keep this file at mode 0600. Nothing here reaches a public relay; the only
+# peer is your own server.
+instance_name = "skd840n"
+hostname = "SK-D840N"
+dhcp = false
+listeners = []
+rpc_portal = "127.0.0.1:15888"
+
+[network_identity]
+network_name = "oyxx"
+network_secret = ""
+
+[[peer]]
+uri = "tcp://bbt.oy138.cn:19880"
+
+[flags]
+no_tun = false
+enable_exit_node = false
+proxy_networks = []
