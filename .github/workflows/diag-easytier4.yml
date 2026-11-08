@@ -1,0 +1,49 @@
+name: Diagnose easytier package drop 4
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+      - uses: actions/checkout@v4
+      - name: Clone source
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/cnjn/ImmortalWrt openwrt
+          cd openwrt && git checkout 1b50aaf4ed9cf042df6207564555b244d6ced517
+      - name: Overlays and feeds
+        run: |
+          cp -a overlays/. openwrt/
+          cd openwrt
+          ./scripts/feeds update luci
+          ./scripts/feeds install -a -p luci
+      - name: Show our Makefile as seen by the build
+        run: |
+          cd openwrt
+          echo '=== package/luci-app-easytier/Makefile ==='
+          cat -A package/luci-app-easytier/Makefile | head -n 40
+          echo '=== ls ==='
+          ls -la package/luci-app-easytier
+      - name: Seed and defconfig with full output
+        run: |
+          cd openwrt
+          cp target/linux/zte/zx279133/config-default .config 2>/dev/null || true
+          printf 'CONFIG_TARGET_zte=y\nCONFIG_TARGET_zte_zx279133=y\nCONFIG_TARGET_zte_zx279133_DEVICE_skyworth_sk-d840n=y\n' >> .config
+          printf 'CONFIG_PACKAGE_easytier=y\nCONFIG_PACKAGE_luci-app-easytier=y\n' >> .config
+          make defconfig 2>&1 | grep -v 'luasrcdiet/host' | tail -n 60 || true
+          echo '=== easytier lines in .config ==='
+          grep -n 'easytier' .config || echo NONE
+          echo '=== is the symbol known at all? ==='
+          grep -n 'luci-app-easytier' tmp/.config-package.in 2>/dev/null | head -n 20 || echo 'not in .config-package.in'
+          echo '=== package info entry? ==='
+          grep -n 'Package: luci-app-easytier' tmp/.packageinfo 2>/dev/null || echo 'no packageinfo entry'
+      - name: Dump with V=s
+        run: |
+          cd openwrt
+          make package/luci-app-easytier/dump V=s 2>&1 | grep -v 'luasrcdiet/host' | tail -n 40 || true
