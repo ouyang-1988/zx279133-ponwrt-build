@@ -1,0 +1,73 @@
+name: Diagnose easytier package drop 2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+
+      - name: Checkout build repo
+        uses: actions/checkout@v4
+
+      - name: Clone ImmortalWrt source
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/cnjn/ImmortalWrt openwrt
+          cd openwrt && git checkout 1b50aaf4ed9cf042df6207564555b244d6ced517
+
+      - name: Apply overlays and feeds
+        run: |
+          cp -a overlays/. openwrt/
+          cd openwrt
+          ./scripts/feeds update luci
+          ./scripts/feeds install -a -p luci
+
+      - name: Reproduce the loss and diff the two makefiles
+        run: |
+          cd openwrt
+          cp target/linux/zte/zx279133/config-default .config 2>/dev/null || true
+          printf 'CONFIG_TARGET_zte=y\nCONFIG_TARGET_zte_zx279133=y\nCONFIG_TARGET_zte_zx279133_DEVICE_skyworth_sk-d840n=y\n' >> .config
+          printf 'CONFIG_PACKAGE_easytier=y\nCONFIG_PACKAGE_luci-app-easytier=y\n' >> .config
+          make defconfig > /tmp/defconfig.log 2>&1 || true
+          echo '=== defconfig: lines mentioning our two packages ==='
+          grep -n 'luci-app-easytier' /tmp/defconfig.log || echo 'silent: never mentioned'
+          echo '=== warnings about our makefile ==='
+          grep -n 'luci-app-easytier\|utils/easytier' /tmp/defconfig.log || echo 'no warnings'
+          echo '=== .config result ==='
+          grep -n 'CONFIG_PACKAGE_easytier\|CONFIG_PACKAGE_luci-app-easytier' .config || echo 'NEITHER PRESENT'
+
+          echo '=== luci.mk: how it decides to include a package ==='
+          sed -n '1,60p' feeds/luci/luci.mk
+          echo '=== what package/luci-app-easytier/dump says on stderr about itself ==='
+          make -s package/luci-app-easytier/dump 2>&1 | grep -i 'luci-app-easytier\|easytier' | head -n 20 || echo 'nothing'
+
+      - name: Try a minimal luci app to isolate
+        run: |
+          cd openwrt
+          mkdir -p package/zz-testapp
+          cat > package/zz-testapp/Makefile <<'EOF'
+          include $(TOPDIR)/rules.mk
+          LUCI_TITLE:=test
+          LUCI_DEPENDS:=+luci-base
+          LUCI_PKGARCH:=all
+          PKG_VERSION:=1.0.0
+          PKG_RELEASE:=1
+          include $(TOPDIR)/feeds/luci/luci.mk
+          EOF
+          sed -i 's/^          //' package/zz-testapp/Makefile
+          printf 'CONFIG_PACKAGE_zz-testapp=y\n' >> .config
+          make defconfig > /tmp/d2.log 2>&1 || true
+          grep -n 'zz-testapp' .config || echo 'zz-testapp ALSO dropped'
+
+      - name: Show the actual luci.mk include mechanism
+        run: |
+          cd openwrt
+          grep -n 'LUCI_DEPENDS\|PKG_BUILD_DEPENDS\|define Package' feeds/luci/luci.mk | head -n 40
