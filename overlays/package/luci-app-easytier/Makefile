@@ -1,12 +1,13 @@
 include $(TOPDIR)/rules.mk
 
-LUCI_TITLE:=EasyTier mesh VPN control
-LUCI_DEPENDS:=+luci-base +rpcd-mod-ucode +ucode-mod-fs
-LUCI_PKGARCH:=all
+PKG_NAME:=luci-app-easytier
 PKG_VERSION:=1.0.0
 PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
-CONFIG_LUCI_CSSTIDY:=
+
+LUCI_TITLE:=EasyTier mesh VPN control
+LUCI_DEPENDS:=+luci-base +rpcd-mod-ucode +ucode-mod-fs +easytier
+LUCI_PKGARCH:=$(ARCH_PACKAGES)
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
@@ -14,12 +15,12 @@ include $(TOPDIR)/feeds/luci/luci.mk
 # luci-compat dependency. Upstream EasyTier/luci-app-easytier is Lua/CBI and
 # would drag luci-lua-runtime and lua into the image for no functional gain.
 #
-# +easytier is deliberately absent from LUCI_DEPENDS: this package is
-# LUCI_PKGARCH=all while easytier is built for aarch64_cortex-a53, and an
-# all-arch package that depends on a target-arch package is dropped by
-# make defconfig without a word. Both are selected explicitly by
-# scripts/configure-sk-d840n.sh, which asserts the outcome instead of the
-# intent. The app itself only needs ubus/rpcd and /etc/init.d/easytier.
-#
-# luci-mod-system/-network/-status are likewise absent: the view uses only what
-# luci-base provides (form.Map/NamedSection, rpc.declare, callLuci*).
+# LUCI_PKGARCH is pinned to $(ARCH_PACKAGES) on purpose. luci.mk defaults to
+# all, and an all-arch package that DEPENDS on a target-arch package
+# (+easytier) is dropped by defconfig in silence - that is what the
+# easytier drop actually was. diag-easytier.yml and diag-easytier2.yml pin
+# this down: easytier survives, luci-app-easytier does not, and neither does
+# a minimal luci-app-* with only +luci-base.
+
+# luci-mod-system/-network/-status stay out of LUCI_DEPENDS: the view uses
+# only luci-base (form.Map/NamedSection, rpc.declare, callLuci*).
