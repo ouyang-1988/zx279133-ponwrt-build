@@ -56,7 +56,7 @@ endef
 
 define Package/easytier/postinst
 #!/bin/sh
-[ -n "$${IPKG_INSTROOT}" ] || /etc/init.d/easytier enable
+[ -n "$" ] || /etc/init.d/easytier enable
 exit 0
 endef
 
