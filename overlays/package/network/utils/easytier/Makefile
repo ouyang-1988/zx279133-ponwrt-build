@@ -18,7 +18,7 @@ endef
 
 define Package/easytier/description
   EasyTier mesh VPN core and CLI, shipped as the official v2.6.4 static
-  aarch64 binaries. TUN/TAP is built into this target's kernel (CONFIG_TUN=y),
+  aarch64 binaries. TUN/TAP is built into this target kernel (CONFIG_TUN=y),
   so there is no kmod-tun dependency and no /dev/net/tun helper needed.
 endef
 
@@ -27,10 +27,6 @@ define Package/easytier/conffiles
 /etc/easytier/config.toml
 endef
 
-# The ELFs under files/ are the upstream release binaries, copied verbatim.
-# No PKG_SOURCE/PKG_HASH and no download step: the build never touches the
-# network, and PKG_HASH:=skip is gone because skip silences the only check
-# that would have noticed a corrupted ELF.
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	$(CP) ./files/* $(PKG_BUILD_DIR)/
@@ -39,7 +35,6 @@ endef
 define Build/Compile
 endef
 
-# Already stripped and statically linked; a strip step would corrupt them.
 RSTRIP:=:
 
 define Package/easytier/install
