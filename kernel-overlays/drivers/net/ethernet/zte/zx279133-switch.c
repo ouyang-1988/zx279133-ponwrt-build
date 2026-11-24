@@ -2955,12 +2955,24 @@ static void zx279133_switch_outerphy_dump(struct zx279133_switch *priv)
 
 /* 0x0000 10, 0x0010 100, 0x0020 1000, 0x0210 2500. Same cases as
  * rtlgen_decode_physr(), limited to the rates this jack can be.
- * Returns false when the speed field is not one of those four, so the
- * caller can keep the previous reading.
+ *
+ * Returns false when the speed field is not one of those four rates.
+ *
+ * The link bit is read before the speed switch and is written on both
+ * paths, because it is an independent field of the same word and it stays
+ * truthful when the speed field reads something this jack cannot report.
+ * With no cable in the jack the word reads 0x1600 - speed field 0x600,
+ * link bit clear - and a caller that only acted on a true return would
+ * keep a stale "up" for as long as the jack stayed empty.
+ *
+ * The duplex is written on the true path only: without a rate to go with
+ * it there is nothing for it to mean.
  */
 static bool zx279133_switch_physr_decode(u16 raw, int *speed, int *duplex,
 					 bool *link)
 {
+	*link = !!(raw & ZX279133_SWITCH_OUTERPHY_PHYSR_LINK);
+
 	switch (raw & ZX279133_SWITCH_OUTERPHY_PHYSR_SPEED) {
 	case 0x0000:
 		*speed = SPEED_10;
@@ -2980,7 +2992,6 @@ static bool zx279133_switch_physr_decode(u16 raw, int *speed, int *duplex,
 
 	*duplex = (raw & ZX279133_SWITCH_OUTERPHY_PHYSR_DUPLEX) ?
 		DUPLEX_FULL : DUPLEX_HALF;
-	*link = !!(raw & ZX279133_SWITCH_OUTERPHY_PHYSR_LINK);
 	return true;
 }
 
@@ -2997,6 +3008,30 @@ static phy_interface_t zx279133_switch_outer_interface(int speed)
 
 /* One Clause-45 read of 1f.0xa434. Nothing else: the AN control register
  * is not touched.
+ *
+ * A word whose speed does not decode still updates the link bit, and that
+ * is what this function now does that it did not before.
+ *
+ * The empty jack is exactly that word: 0x1600, speed field 0x600, link bit
+ * clear.  The old code skipped the whole update on an undecodable word, so
+ * `outer_link` kept the reading from the last moment a cable was in, the
+ * port went on publishing carrier into an empty jack, the bridge went on
+ * forwarding into it, and the netdev-triggered LED on this port stayed lit
+ * after the cable was pulled.  Measured on 2026-11-24: the far end's AN
+ * status walked 0x0069 -> 0x002d -> 0x0008 as the cable came out, PHYSR
+ * read 0x1600, and no "Link is Down" line was ever printed for lan1, while
+ * lan4 - whose PHY is a real one - printed its own at the same moment.
+ *
+ * The remembered speed, duplex and interface are kept when the decode
+ * fails, on purpose.  phylink ignores the rate of a port whose link is
+ * down, so blanking them buys nothing, and blanking them would make the
+ * next cable-in rebuild the whole configuration from SPEED_UNKNOWN.  Only
+ * the link bit is forced false.
+ *
+ * `outer_reported` keeps its old meaning - "a decoded reading exists" -
+ * so a boot that finds the jack empty behaves exactly as it did: phylink
+ * keeps the device tree's fixed-link values and nothing here contradicts
+ * them.
  */
 static void zx279133_switch_outer_link_state(struct zx279133_switch *priv,
 					     struct phylink_link_state *state)
@@ -3011,13 +3046,23 @@ static void zx279133_switch_outer_link_state(struct zx279133_switch *priv,
 		raw = mdiobus_c45_read(bus, ZX279133_SWITCH_OUTERPHY_ADDR,
 				       ZX279133_SWITCH_OUTERPHY_PHYSR_DEVAD,
 				       ZX279133_SWITCH_OUTERPHY_PHYSR);
-	if (raw >= 0 &&
-	    zx279133_switch_physr_decode((u16)raw, &speed, &duplex, &link)) {
-		priv->outer_reported = true;
-		priv->outer_speed = speed;
-		priv->outer_duplex = duplex;
-		priv->outer_link = link;
-		priv->outer_interface = zx279133_switch_outer_interface(speed);
+	if (raw >= 0) {
+		if (zx279133_switch_physr_decode((u16)raw, &speed, &duplex,
+						 &link)) {
+			priv->outer_reported = true;
+			priv->outer_speed = speed;
+			priv->outer_duplex = duplex;
+			priv->outer_link = link;
+			priv->outer_interface =
+				zx279133_switch_outer_interface(speed);
+		} else {
+			/*
+			 * The rate is not one this jack can report, so the jack
+			 * is empty and the link bit says so.  Take it, and leave
+			 * the last decoded rate in place for the next cable-in.
+			 */
+			priv->outer_link = false;
+		}
 	}
 
 	if (!priv->outer_reported) {

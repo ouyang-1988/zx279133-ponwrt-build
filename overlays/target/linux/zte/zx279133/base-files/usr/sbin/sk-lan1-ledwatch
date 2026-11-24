@@ -1,0 +1,85 @@
+#!/bin/sh
+# /usr/sbin/sk-lan1-ledwatch
+#
+# Keep skyworth:green:lan1 honest about the 2.5G jack.
+#
+# Why this exists
+# ---------------
+# The 2.5G jack's link state comes from zx279133_switch_outer_link_state(),
+# which reads the RTL8226's PHYSR word (devad 0x1f, reg 0xa434) and decodes
+# the speed field.  With no cable in the jack that word reads 0x1600, whose
+# speed field is 0x600 - not one of the four rates the decoder knows - and
+# before the patch that ships next to this script the decoder's false return
+# made the caller skip the whole update.  The cached state kept saying "link
+# up at 1G" from the last plugged-in moment, the port kept publishing
+# carrier, the bridge kept forwarding into an empty jack, and this LED
+# (netdev trigger) stayed lit after the cable was pulled.
+#
+# The kernel patch in
+# kernel-overlays/drivers/net/ethernet/zte/zx279133-switch.c is the real fix:
+# it reads the link bit (BIT(2)) independently of the speed field and forces
+# the link down when the speed does not decode.  This script is the fallback
+# for an image that was flashed before that patch, and it stays useful after
+# it: it is also what makes the lamp come back on the moment a cable is
+# plugged into an empty jack, which phylink's fixed-link polling does on its
+# own schedule rather than instantly.
+#
+# What it reads
+# -------------
+# The driver prints the far end's AN status word whenever it changes:
+#
+#	the 2.5G jack's PHY: AN status 0x%04x, the lane's four bits ...
+#
+# Bit 2 of that word is the partner bit (ZX279133_SWITCH_OUTERPHY_AN_PARTNER).
+# Measured on this board on 2026-11-24: 0x0069 and 0x002d have it set with a
+# cable in, 0x0008 and 0x0049 have it clear with the jack empty.
+#
+# dmesg is read rather than sysfs because the word has no sysfs attribute:
+# the driver's LAN1 LED classdev exposes `link`, `link_2500`, `rx`, `tx` and
+# the netdev-trigger fields, but those are the netdev trigger's own view and
+# they follow the same stale carrier this script exists to work around.
+#
+# The LED is driven directly (trigger=none).  The trigger is re-checked every
+# pass, because /etc/init.d/led reassigns it from uci whenever it restarts.
+
+LED=/sys/class/leds/skyworth:green:lan1
+INTERVAL=${INTERVAL:-2}
+WINDOW=${WINDOW:-16384}
+
+[ -d "$LED" ] || exit 0
+
+state=
+
+set_led() {
+	[ "$1" = "$state" ] && return 0
+	if [ "$1" = up ]; then
+		echo 1 > "$LED/brightness" 2>/dev/null
+	else
+		echo 0 > "$LED/brightness" 2>/dev/null
+	fi
+	state=$1
+}
+
+claim() {
+	# Only write the trigger when it is not already ours: writing the same
+	# value again re-arms the netdev trigger and undoes the brightness.
+	case "$(cat "$LED/trigger" 2>/dev/null)" in
+	*"[none]"*) ;;
+	*) echo none > "$LED/trigger" 2>/dev/null ;;
+	esac
+}
+
+while :; do
+	claim
+	word=$(dmesg | tail -c "$WINDOW" |
+	       sed -n 's/.*the 2\.5G jack.s PHY: AN status 0x\([0-9a-fA-F]\{4\}\).*/\1/p' |
+	       tail -n 1)
+	if [ -n "$word" ]; then
+		if [ $(( 0x$word & 0x4 )) -ne 0 ]; then
+			set_led up
+		else
+			set_led down
+		fi
+	fi
+	sleep "$INTERVAL"
+done

@@ -1,0 +1,19 @@
+#!/bin/sh /etc/rc.common
+# /etc/init.d/sk-lan1-ledwatch
+#
+# Run /usr/sbin/sk-lan1-ledwatch, which keeps skyworth:green:lan1 honest
+# about the 2.5G jack on an image flashed before the zx279133-switch.c fix.
+# See that script for the whole story.
+
+START=97
+STOP=10
+USE_PROCD=1
+
+start_service() {
+	procd_open_instance
+	procd_set_param command /usr/sbin/sk-lan1-ledwatch
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
