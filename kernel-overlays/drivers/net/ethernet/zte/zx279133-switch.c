@@ -3026,7 +3026,7 @@ static phy_interface_t zx279133_switch_outer_interface(int speed)
  * fails, on purpose.  phylink ignores the rate of a port whose link is
  * down, so blanking them buys nothing, and blanking them would make the
  * next cable-in rebuild the whole configuration from SPEED_UNKNOWN.  Only
- * the link bit is forced false.
+ * the link bit is taken from the fresh reading.
  *
  * `outer_reported` keeps its old meaning - "a decoded reading exists" -
  * so a boot that finds the jack empty behaves exactly as it did: phylink
@@ -3057,11 +3057,19 @@ static void zx279133_switch_outer_link_state(struct zx279133_switch *priv,
 				zx279133_switch_outer_interface(speed);
 		} else {
 			/*
-			 * The rate is not one this jack can report, so the jack
-			 * is empty and the link bit says so.  Take it, and leave
-			 * the last decoded rate in place for the next cable-in.
+			 * The rate is not one this jack can report - in
+			 * practice the jack is empty - so take the link bit,
+			 * which the decoder wrote before it gave up on the
+			 * rate, and leave the last decoded rate in place for
+			 * the next cable-in.
+			 *
+			 * The bit is used rather than a hardcoded false
+			 * because it is a real reading: a word whose rate is
+			 * mid-negotiation and whose link bit is set should
+			 * keep the port up for the poll it takes to settle,
+			 * not drop it.
 			 */
-			priv->outer_link = false;
+			priv->outer_link = link;
 		}
 	}
 

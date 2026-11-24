@@ -1,28 +1,30 @@
 #!/bin/sh
 # /usr/sbin/sk-lan1-ledwatch
 #
-# Keep skyworth:green:lan1 honest about the 2.5G jack.
+# Keep skyworth:green:lan1 honest about the 2.5G jack on an image that was
+# flashed before the zx279133-switch.c fix, and get out of the way once that
+# fix is in.
 #
-# Why this exists
-# ---------------
-# The 2.5G jack's link state comes from zx279133_switch_outer_link_state(),
-# which reads the RTL8226's PHYSR word (devad 0x1f, reg 0xa434) and decodes
-# the speed field.  With no cable in the jack that word reads 0x1600, whose
-# speed field is 0x600 - not one of the four rates the decoder knows - and
-# before the patch that ships next to this script the decoder's false return
-# made the caller skip the whole update.  The cached state kept saying "link
-# up at 1G" from the last plugged-in moment, the port kept publishing
-# carrier, the bridge kept forwarding into an empty jack, and this LED
-# (netdev trigger) stayed lit after the cable was pulled.
+# The bug this works around
+# -------------------------
+# The 2.5G jack has no phy_device: it is a fixed-link port whose link state
+# the switch driver answers itself, from one Clause-45 read of the RTL8226's
+# PHYSR word (devad 0x1f, reg 0xa434).  That word carries the speed in bits
+# 10:9 and 5:4 and the link in bit 2.  An empty jack reads 0x1600, whose
+# speed field is 0x600 - not one of the four rates this jack can report.
 #
-# The kernel patch in
-# kernel-overlays/drivers/net/ethernet/zte/zx279133-switch.c is the real fix:
-# it reads the link bit (BIT(2)) independently of the speed field and forces
-# the link down when the speed does not decode.  This script is the fallback
-# for an image that was flashed before that patch, and it stays useful after
-# it: it is also what makes the lamp come back on the moment a cable is
-# plugged into an empty jack, which phylink's fixed-link polling does on its
-# own schedule rather than instantly.
+# zx279133_switch_physr_decode() returned false for that word, and the caller
+# treated false as "no news": it skipped the whole update.  So `outer_link`
+# kept the value from the last moment a cable was in, the port went on
+# publishing carrier into an empty jack, and the netdev-triggered LED on lan1
+# stayed lit after the cable was pulled.  Measured on 2026-11-24:
+#
+#	plugged in, 1G		PHYSR 0x192c	AN status 0x002d
+#	cable pulled		PHYSR 0x1600	AN status 0x0008
+#	boot, jack empty	PHYSR 0x1600	AN status 0x0008
+#
+# lan4, whose PHY is a real one, printed "Link is Down" at the same moment
+# lan1 printed nothing.
 #
 # What it reads
 # -------------
@@ -30,17 +32,23 @@
 #
 #	the 2.5G jack's PHY: AN status 0x%04x, the lane's four bits ...
 #
-# Bit 2 of that word is the partner bit (ZX279133_SWITCH_OUTERPHY_AN_PARTNER).
-# Measured on this board on 2026-11-24: 0x0069 and 0x002d have it set with a
-# cable in, 0x0008 and 0x0049 have it clear with the jack empty.
+# Bit 2 of that word is the partner bit (ZX279133_SWITCH_OUTERPHY_AN_PARTNER):
+# set in 0x0069 and 0x002d with a cable in, clear in 0x0008 and 0x0049 with
+# the jack empty.  The last such line in the ring is the current answer.
 #
-# dmesg is read rather than sysfs because the word has no sysfs attribute:
-# the driver's LAN1 LED classdev exposes `link`, `link_2500`, `rx`, `tx` and
-# the netdev-trigger fields, but those are the netdev trigger's own view and
-# they follow the same stale carrier this script exists to work around.
+# dmesg is read rather than sysfs because the word has no sysfs attribute,
+# and because the LAN1 classdev's own `link` / `link_2500` / `rx` / `tx`
+# fields are the netdev trigger's view - the same stale carrier this script
+# exists to work around.
 #
-# The LED is driven directly (trigger=none).  The trigger is re-checked every
-# pass, because /etc/init.d/led reassigns it from uci whenever it restarts.
+# What it does with the LED
+# -------------------------
+# Nothing, as long as the kernel's carrier and the AN status agree.  When
+# they disagree the kernel is the one that is wrong, so the lamp is driven
+# directly (trigger=none) and the trigger is re-checked every pass, because
+# /etc/init.d/led reassigns it from uci whenever it restarts.  When they
+# agree again the lamp is handed back, so an image with the fix keeps the
+# netdev trigger's activity blink instead of this steady level.
 
 LED=/sys/class/leds/skyworth:green:lan1
 INTERVAL=${INTERVAL:-2}
@@ -48,38 +56,69 @@ WINDOW=${WINDOW:-16384}
 
 [ -d "$LED" ] || exit 0
 
-state=
+owned=
+shown=
 
-set_led() {
-	[ "$1" = "$state" ] && return 0
-	if [ "$1" = up ]; then
-		echo 1 > "$LED/brightness" 2>/dev/null
-	else
-		echo 0 > "$LED/brightness" 2>/dev/null
-	fi
-	state=$1
+# Hand the lamp back to whoever uci says owns it.
+release() {
+	[ -n "$owned" ] || return 0
+	owned=
+	shown=
+	# `netdev` is what /etc/config/system asks for on this lamp.
+	echo netdev > "$LED/trigger" 2>/dev/null
+	echo lan1 > "$LED/device_name" 2>/dev/null
 }
 
+# Take the lamp away from the netdev trigger.  Only write the trigger when it
+# is not already ours: writing the same value again re-arms the trigger and
+# undoes the brightness underneath it.
 claim() {
-	# Only write the trigger when it is not already ours: writing the same
-	# value again re-arms the netdev trigger and undoes the brightness.
+	owned=1
 	case "$(cat "$LED/trigger" 2>/dev/null)" in
 	*"[none]"*) ;;
 	*) echo none > "$LED/trigger" 2>/dev/null ;;
 	esac
 }
 
+set_led() {
+	[ "$1" = "$shown" ] && return 0
+	if [ "$1" = up ]; then
+		echo 1 > "$LED/brightness" 2>/dev/null
+	else
+		echo 0 > "$LED/brightness" 2>/dev/null
+	fi
+	shown=$1
+}
+
 while :; do
-	claim
 	word=$(dmesg | tail -c "$WINDOW" |
 	       sed -n 's/.*the 2\.5G jack.s PHY: AN status 0x\([0-9a-fA-F]\{4\}\).*/\1/p' |
 	       tail -n 1)
-	if [ -n "$word" ]; then
-		if [ $(( 0x$word & 0x4 )) -ne 0 ]; then
+	carrier=$(cat /sys/class/net/lan1/carrier 2>/dev/null)
+
+	if [ -z "$word" ] || [ -z "$carrier" ]; then
+		# Nothing to compare against yet: leave the lamp alone.
+		release
+		sleep "$INTERVAL"
+		continue
+	fi
+
+	if [ $(( 0x$word & 0x4 )) -ne 0 ]; then
+		want=1
+	else
+		want=0
+	fi
+
+	if [ "$carrier" = "$want" ]; then
+		release
+	else
+		claim
+		if [ "$want" = 1 ]; then
 			set_led up
 		else
 			set_led down
 		fi
 	fi
+
 	sleep "$INTERVAL"
 done

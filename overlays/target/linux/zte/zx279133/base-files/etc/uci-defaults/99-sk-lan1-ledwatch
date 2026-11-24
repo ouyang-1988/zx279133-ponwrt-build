@@ -1,0 +1,17 @@
+#!/bin/sh
+# Link the LAN1 lamp watcher and start it once, the way 99-sk-bridge does.
+#
+# Image builds run uci-defaults and then delete them, so the rc.d link is what
+# makes later boots start it; the explicit start is for the boot that ran this
+# script.  Nothing here waits on anything.
+mkdir -p /etc/rc.d
+ln -sf ../init.d/sk-lan1-ledwatch /etc/rc.d/S97sk-lan1-ledwatch
+
+if [ -n "${IPKG_INSTROOT:-}" ] || [ -n "${PKG_ROOT:-}" ] || [ -n "${CI:-}" ]; then
+	exit 0
+fi
+
+if [ -x /etc/init.d/sk-lan1-ledwatch ]; then
+	/etc/init.d/sk-lan1-ledwatch start
+fi
+exit 0
