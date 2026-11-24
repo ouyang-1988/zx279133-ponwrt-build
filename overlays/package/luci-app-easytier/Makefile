@@ -1,21 +1,64 @@
+#
+# Copyright (C) 2008-2014 The LuCI Team <luci@lists.subsignal.org>
+#
+# This is free software, licensed under the Apache License, Version 2.0 .
+#
+
 include $(TOPDIR)/rules.mk
+-include $(dir $(lastword $(MAKEFILE_LIST)))../version.mk
+
+PKG_VERSION:=$(or $(EASYTIER_VERSION),2.7.0)
+PKG_RELEASE:=1
+
+PKG_PO_VERSION:=$(PKG_VERSION)
+
+LUCI_TITLE:=LuCI support for EasyTier
+# kmod-tun is deliberately absent. This target builds CONFIG_TUN=y into the
+# kernel and ships no kmod package feed at all, so +kmod-tun would name a
+# package that cannot exist and defconfig would drop this one in silence.
+LUCI_DEPENDS:=+luci-compat +luci-lua-runtime
+LUCI_PKGARCH:=all
 
 PKG_NAME:=luci-app-easytier
-PKG_VERSION:=1.0.0
-PKG_RELEASE:=1
-PKG_LICENSE:=Apache-2.0
 
-LUCI_TITLE:=EasyTier mesh VPN control
-LUCI_DEPENDS:=+luci-base +rpcd-mod-ucode +ucode-mod-fs +easytier
-LUCI_PKGARCH:=all
+define Package/$(PKG_NAME)/conffiles
+/etc/config/easytier
+/etc/easytier/
+endef
+
+define Package/$(PKG_NAME)/prerm
+#!/bin/sh
+if [ -f /etc/config/easytier ] ; then
+  echo "备份luci配置文件/etc/config/easytier到/tmp/easytier_backup"
+  echo "不重启设备之前再次安装luci-app-easytier 配置不丢失,无需重新配置"
+  cp -rf /etc/config/easytier /tmp/easytier_backup
+fi
+
+if ls /etc/easytier/* >/dev/null 2>&1; then
+  echo "备份easytier配置目录/etc/easytier到/tmp/et_config_backup"
+  echo "不重启设备之前再次安装luci-app-easytier 配置不丢失,无需重新配置"
+  cp -rf /etc/easytier /tmp/et_config_backup
+fi
+
+endef
+
+define Package/$(PKG_NAME)/postinst
+#!/bin/sh
+chmod +x /etc/init.d/easytier
+if [ -f /tmp/easytier_backup ] ; then
+  echo "发现luci备份配置文件/tmp/easytier_backup，开始恢复到/etc/config/easytier"
+  rm -rf /etc/config/easytier
+  mv -f /tmp/easytier_backup /etc/config/easytier
+  echo "请前往 VPN - EasyTier 界面进行重启插件"
+fi
+if [ -d /tmp/et_config_backup ] ; then
+  echo "发现easytier备份配置目录/tmp/et_config_backup，开始恢复到/etc/easytier"
+  rm -rf /etc/easytier
+  mv -f /tmp/et_config_backup /etc/easytier
+  echo "请前往 VPN - EasyTier 界面进行重启插件"
+fi
+endef
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
-# This app is written for the 25.12 JS/ucode LuCI: no luasrc/, no CBI and no
-# luci-compat dependency. Upstream EasyTier/luci-app-easytier is Lua/CBI and
-# would drag luci-lua-runtime and lua into the image for no functional gain.
-#
-# luci-mod-system/-network/-status stay out of LUCI_DEPENDS: the view uses
-# only luci-base (form.Map/NamedSection, rpc.declare, callLuci*).
-
-# call BuildPackage - OpenWrt buildroot scan signature
+# call BuildPackage - OpenWrt buildroot signature

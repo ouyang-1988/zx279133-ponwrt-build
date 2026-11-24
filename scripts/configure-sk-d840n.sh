@@ -518,12 +518,27 @@ printf '%s\n' CONFIG_PACKAGE_luci-app-sk-d840n-pon=y CONFIG_PACKAGE_luci-theme-a
 	CONFIG_PACKAGE_luci-i18n-argon-config-zh-cn=y CONFIG_LUCI_LANG_zh_Hans=y \
 	CONFIG_PACKAGE_firewall4=y CONFIG_PACKAGE_luci-app-firewall=y CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y >>.config
 
-# EasyTier 2.6.4: prebuilt static aarch64 binaries, shipped in overlays/ so the
-# build never touches the network, plus a JS/ucode LuCI page. TUN itself is a
-# kernel built-in (CONFIG_TUN=y in configs/sk-d840n-offload.config), so there is
-# no kmod-tun to select here - this target has no kmod package feed.
+# EasyTier 2.7.0: prebuilt static aarch64 binaries shipped in overlays/, so the
+# build never touches the network, plus the upstream Lua/CBI LuCI app. TUN itself
+# is a kernel built-in (CONFIG_TUN=y in configs/sk-d840n-offload.config), so
+# there is no kmod-tun here - this target has no kmod package feed.
+#
+# luci-compat and luci-lua-runtime are named explicitly rather than left to be
+# pulled in: the app is a luasrc/CBI package, and luci.mk only adds the runtime
+# dependency when luasrc/* exists, which a plain grep for the package name would
+# not reveal. Selecting them by hand keeps the assertion below honest.
+#
+# unzip and curl are the app's runtime dependencies, not build dependencies:
+# /usr/share/easytier/download.sh shells out to `unzip -j -q -o` and prefers
+# `curl` (wget is the fallback). Both are needed for the "download the binary
+# from the panel" button and for the online update path to work on the device.
 printf 'CONFIG_PACKAGE_easytier=y\n' >>.config
 printf 'CONFIG_PACKAGE_luci-app-easytier=y\n' >>.config
+printf 'CONFIG_PACKAGE_luci-compat=y\n' >>.config
+printf 'CONFIG_PACKAGE_luci-lua-runtime=y\n' >>.config
+printf 'CONFIG_PACKAGE_luci-i18n-easytier-zh-cn=y\n' >>.config
+printf 'CONFIG_PACKAGE_unzip=y\n' >>.config
+printf 'CONFIG_PACKAGE_curl=y\n' >>.config
 
 skd840n_select_theme .
 make defconfig

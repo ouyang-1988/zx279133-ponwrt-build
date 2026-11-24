@@ -1,6 +1,0 @@
-config easytier 'main'
-	option enabled '1'
-	option bin '/usr/bin/easytier-core'
-	option config_file '/etc/easytier/config.toml'
-	option log 'warn'
-	option extra_args ''
